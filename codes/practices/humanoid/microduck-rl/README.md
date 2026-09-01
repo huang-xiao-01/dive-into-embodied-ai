@@ -120,6 +120,21 @@ uv run train Mjlab-Velocity-Flat-MicroDuck \
 
 不要仅凭 reward 宣称稳定：至少同时检查 episode length、`Episode_Termination/fell_over`、速度跟踪误差，并用固定 checkpoint 做 200 帧以上离屏回放。训练产物继续留在本地 `logs/`，教程只提交可复现命令、曲线和经过验收的媒体。
 
+如果要专门训练抗高频扰动的策略，可将训练 push 频率对齐 play 模式的压力验收：
+
+```bash
+MICRODUCK_STRESS_PUSHES=1 WANDB_MODE=offline uv run train Mjlab-Velocity-Flat-MicroDuck \
+  --env.scene.num-envs 256 --env.seed 42 --agent.seed 42 \
+  --agent.resume True --agent.load-run '<run-name>' \
+  --agent.load-checkpoint 'model_<step>.pt' \
+  --agent.algorithm.learning-rate 0.0001 \
+  --agent.algorithm.schedule fixed \
+  --agent.max-iterations 500 --agent.save-interval 100 \
+  --agent.logger tensorboard --agent.upload-model False
+```
+
+该模式把训练期速度 push 间隔从常规的 3–6 秒缩短到 0.5–1 秒，适合做压力测试；它会显著降低训练 reward，不应和常规步态训练曲线直接比较。
+
 无显示会话时，可用 CPU ONNX + EGL 离屏回放，避免启动 Viser：
 
 ```bash
