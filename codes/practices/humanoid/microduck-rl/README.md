@@ -93,6 +93,14 @@ cd codes/practices/humanoid/microduck-rl
 uv run python scripts/summarize_training_matrix.py
 ```
 
+完整的自动验收脚本是：
+
+```bash
+./scripts/evaluate_stable_matrix.sh
+```
+
+它会优先选用 stage2 最后 checkpoint（没有时回退到 stage1），逐模式生成 200 帧 MP4/GIF，并把回放统计写入 `logs/mode_matrix_stable/videos/evaluation_status.tsv`。
+
 CPU 侧的配置与奖励回归测试：
 
 ```bash
