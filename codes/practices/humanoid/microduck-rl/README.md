@@ -87,6 +87,12 @@ cd codes/practices/humanoid/microduck-rl
 
 `stage1` 从各自的 smoke checkpoint 续训 500 轮、每个任务 64 个环境（滚轮起立使用 32 个环境），约 0.8M transitions/任务，用于筛出奖励和存活曲线确实上升的模式；`stage2` 自动读取最新 stage1 checkpoint，按任务课程里程碑继续训练（例如 SitStand 至 2500、StandUp 至 4000、滚轮速度至 5000、Roulade 至 6000 轮）。两个脚本都将每个任务的日志写入 `logs/mode_matrix_stable/`，状态表分别为 `stage1_status.tsv` 和 `stage2_status.tsv`。脚本只保证训练链路串行完成，不会仅凭 reward 把策略标为稳定；发布前仍需运行 TensorBoard 报告和实际 mjlab 离屏回放，检查 episode length、termination、姿态和动作抖动。
 
+训练过程中或训练结束后，可以生成一个跨模式汇总图和 CSV：
+
+```bash
+uv run python scripts/summarize_training_matrix.py
+```
+
 CPU 侧的配置与奖励回归测试：
 
 ```bash
