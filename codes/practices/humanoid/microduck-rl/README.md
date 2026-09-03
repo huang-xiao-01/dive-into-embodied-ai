@@ -77,6 +77,16 @@ WANDB_MODE=offline uv run train Mjlab-Velocity-Flat-MicroDuck \
 
 将命令中的任务 ID 替换为 `list-envs | grep MicroDuck` 输出的其他任务即可逐个训练。50 iterations 只证明任务可以独立构建、stepping 和保存 checkpoint；它不等同于动作收敛。稳定步态需要各策略分别续训，并分别检查 episode length、跌倒终止和离屏回放。
 
+如果要把 18 个模式批量推进到可验收的稳定候选版本，可使用两个串行阶段（当前开发机只有 4 GiB 显存，不能并发跑多个任务）：
+
+```bash
+cd codes/practices/humanoid/microduck-rl
+./scripts/train_stable_matrix_stage1.sh
+./scripts/train_stable_matrix_stage2.sh
+```
+
+`stage1` 从各自的 smoke checkpoint 续训 500 轮、每个任务 64 个环境（滚轮起立使用 32 个环境），约 0.8M transitions/任务，用于筛出奖励和存活曲线确实上升的模式；`stage2` 自动读取最新 stage1 checkpoint，按任务课程里程碑继续训练（例如 SitStand 至 2500、StandUp 至 4000、滚轮速度至 5000、Roulade 至 6000 轮）。两个脚本都将每个任务的日志写入 `logs/mode_matrix_stable/`，状态表分别为 `stage1_status.tsv` 和 `stage2_status.tsv`。脚本只保证训练链路串行完成，不会仅凭 reward 把策略标为稳定；发布前仍需运行 TensorBoard 报告和实际 mjlab 离屏回放，检查 episode length、termination、姿态和动作抖动。
+
 CPU 侧的配置与奖励回归测试：
 
 ```bash
