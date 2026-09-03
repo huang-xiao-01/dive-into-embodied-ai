@@ -43,6 +43,7 @@ printf 'task\tstatus\trun\tcheckpoint\tadditional_iterations\n' > "$status_file"
 
 for spec in "${tasks[@]}"; do
   IFS='|' read -r task slug target envs <<< "$spec"
+  base_slug="${slug%-stage1}"
 
   if [[ -n "${TASK_REGEX:-}" && ! "$task" =~ ${TASK_REGEX} ]]; then
     continue
@@ -52,10 +53,14 @@ for spec in "${tasks[@]}"; do
     continue
   fi
 
-  # A stage-1 run is named with a timestamp followed by _${slug}.  Select the
-  # highest checkpoint number, which also makes rerunning this script resume
-  # from the best completed stage rather than from the original smoke model.
-  checkpoint="$(find "$root" -mindepth 2 -maxdepth 2 -type f -path "*_${slug}/model_*.pt" -printf '%p\n' 2>/dev/null | awk -F/ '{print $(NF-1) "\t" $NF "\t" $0}' | sort -k2,2V | tail -1 | cut -f3-)"
+  # Prefer a completed stage-2 run when this script is resumed.  Otherwise a
+  # stage-1 run is named with a timestamp followed by _${slug}.  Select the
+  # highest checkpoint number so a rerun resumes from the best completed stage
+  # rather than from the original smoke model.
+  checkpoint="$(find "$root" -mindepth 2 -maxdepth 2 -type f -path "*_${base_slug}-stage2/model_*.pt" -printf '%p\n' 2>/dev/null | awk -F/ '{print $(NF-1) "\t" $NF "\t" $0}' | sort -k2,2V | tail -1 | cut -f3-)"
+  if [[ -z "$checkpoint" ]]; then
+    checkpoint="$(find "$root" -mindepth 2 -maxdepth 2 -type f -path "*_${slug}/model_*.pt" -printf '%p\n' 2>/dev/null | awk -F/ '{print $(NF-1) "\t" $NF "\t" $0}' | sort -k2,2V | tail -1 | cut -f3-)"
+  fi
 
   # SitStand-Flat is allowed to use the higher-quality 256-env probe if stage
   # 1 was intentionally skipped while that probe was running.
@@ -80,7 +85,7 @@ for spec in "${tasks[@]}"; do
 
   # Stage the checkpoint under the same experiment so mjlab's --load-run
   # resolver can load it, even when it originated from the smoke experiment.
-  stage_run="stage2_source_${slug}"
+  stage_run="stage2_source_${base_slug}"
   stage_path="${root}/${stage_run}"
   mkdir -p "$stage_path"
   cp "$checkpoint" "${stage_path}/${checkpoint_name}"
@@ -98,13 +103,13 @@ for spec in "${tasks[@]}"; do
     --agent.save-interval 250 \
     --agent.logger tensorboard \
     --agent.experiment-name "$experiment" \
-    --agent.run-name "${slug}-stage2" \
+    --agent.run-name "${base_slug}-stage2" \
     --agent.upload-model False > "$task_log" 2>&1
   code=$?
   set +e
 
   if [[ "$code" -eq 0 ]]; then
-    final_ckpt="$(find "$root" -mindepth 2 -maxdepth 2 -type f -path "*_${slug}-stage2/model_*.pt" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)"
+    final_ckpt="$(find "$root" -mindepth 2 -maxdepth 2 -type f -path "*_${base_slug}-stage2/model_*.pt" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)"
     printf '%s\tok\t%s\t%s\t%s\n' "$task" "${final_ckpt%/*}" "${final_ckpt##*/}" "$additional" >> "$status_file"
     echo "[stable-matrix] ${task}: OK (${final_ckpt:-checkpoint not found})"
   else
