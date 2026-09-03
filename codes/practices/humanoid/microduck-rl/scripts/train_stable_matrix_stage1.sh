@@ -58,8 +58,6 @@ for spec in "${tasks[@]}"; do
   fi
 
   source_path="logs/rsl_rl/${source_experiment}/${source_run}/${source_checkpoint}"
-  stage_run="stage_${slug}"
-  stage_path="${stage_root}/${stage_run}"
   task_log="${run_log_root}/${slug}.log"
 
   if [[ ! -f "$source_path" ]]; then
@@ -68,18 +66,45 @@ for spec in "${tasks[@]}"; do
     continue
   fi
 
-  mkdir -p "$stage_path"
-  cp "$source_path" "${stage_path}/${source_checkpoint}"
+  # Make the stage restartable.  A clean shutdown/reboot can interrupt a
+  # long task before its next save interval; on the next invocation, resume
+  # from the highest checkpoint already produced for this slug.  Staging
+  # directories also match this search and are harmless model_49 fallbacks.
+  source_iter="${source_checkpoint#model_}"
+  source_iter="${source_iter%.pt}"
+  desired_final=$((source_iter + iterations - 1))
+  latest="$(find "${stage_root}" -mindepth 2 -maxdepth 2 -type f -path "*_${slug}/model_*.pt" -printf '%p\n' 2>/dev/null | awk -F/ '{print $NF "\t" $0}' | sort -k1,1V | tail -1 | cut -f2-)"
+  if [[ -n "$latest" ]]; then
+    latest_name="${latest##*/}"
+    latest_iter="${latest_name#model_}"
+    latest_iter="${latest_iter%.pt}"
+  else
+    latest="$source_path"
+    latest_name="$source_checkpoint"
+    latest_iter="$source_iter"
+  fi
 
-  echo "[stable-matrix] ${task}: +${iterations} iterations, ${envs} envs"
+  if (( latest_iter >= desired_final )); then
+    printf '%s\tok\t%s\t%s\n' "$task" "${latest%/*}" "$latest_name" >> "$status_file"
+    echo "[stable-matrix] ${task}: already complete (${latest_name})"
+    continue
+  fi
+
+  additional=$((desired_final - latest_iter + 1))
+  stage_run="stage_resume_${slug}"
+  stage_path="${stage_root}/${stage_run}"
+  mkdir -p "$stage_path"
+  cp "$latest" "${stage_path}/${latest_name}"
+
+  echo "[stable-matrix] ${task}: resume ${latest_name} -> ${desired_final} (+${additional}), ${envs} envs"
   set +e
   WANDB_MODE=offline uv run train "$task" \
     --env.scene.num-envs "$envs" \
     --env.seed 42 --agent.seed 42 \
     --agent.resume True \
     --agent.load-run "$stage_run" \
-    --agent.load-checkpoint "$source_checkpoint" \
-    --agent.max-iterations "$iterations" \
+    --agent.load-checkpoint "$latest_name" \
+    --agent.max-iterations "$additional" \
     --agent.save-interval 100 \
     --agent.logger tensorboard \
     --agent.experiment-name "$experiment" \
