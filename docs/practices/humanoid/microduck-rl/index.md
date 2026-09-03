@@ -147,6 +147,44 @@ uv run scripts/infer_policy.py \
 
 这两个 demo 的定位是“加载、推理和仿真链路验证”。5 iteration checkpoint 训练步数很少，不能把 viewer 中的动作当作已经收敛的行走策略；要展示稳定步态，需要更长训练并固定 checkpoint 来源。训练产生的 `.pt`、ONNX 和 W&B offline run 默认留在本地，不提交到教程仓库，以避免二进制和实验日志膨胀。
 
+## 多模式独立训练矩阵
+
+MicroDuck 的动作并不是一套权重覆盖所有目标。每个任务族都有自己的奖励、命令或地形配置，因此本轮为每个模式单独创建 PPO run 和 checkpoint；共享的只是 61D actor observation / 14D action 接口以及运行时切换约定。下面是当前 CUDA 12.2 兼容分支在 RTX 3050 Laptop 4 GiB 上的独立 smoke 结果：
+
+| 任务 | 配置 | 结果 |
+| --- | --- | --- |
+| `Mjlab-Velocity-Flat-MicroDuck` | 32 env × 50 iter | `model_49.pt`，通过 |
+| `Mjlab-Velocity-Rough-MicroDuck` | 32 env × 50 iter | `model_49.pt`，通过 |
+| `Mjlab-VelStand-Flat-MicroDuck` | 32 env × 50 iter | `model_49.pt`，通过 |
+| `Mjlab-VelStand-Rough-MicroDuck` | 32 env × 50 iter | `model_49.pt`，通过 |
+| `Mjlab-StandUp-Flat-MicroDuck` | 32 env × 10 iter | `model_9.pt`，通过 |
+| `Mjlab-StandUp-Rough-MicroDuck` | 32 env × 50 iter | `model_49.pt`，通过 |
+| `Mjlab-SitStand-Flat-MicroDuck` | 32 env × 50 iter | `model_49.pt`，通过 |
+| `Mjlab-SitStand-Rough-MicroDuck` | 32 env × 50 iter | `model_49.pt`，通过 |
+| `Mjlab-GroundPick-Flat-MicroDuck` | 32 env × 50 iter | `model_49.pt`，通过 |
+| `Mjlab-GroundPick-Rough-MicroDuck` | 32 env × 50 iter | `model_49.pt`，通过 |
+| `Mjlab-BallKick-Flat-MicroDuck` | 32 env × 50 iter | `model_49.pt`，通过 |
+| `Mjlab-Velocity-Flat-MicroDuck-Rollers` | 32 env × 50 iter | `model_49.pt`，通过 |
+| `Mjlab-Velocity-Swizzle-MicroDuck` | 32 env × 50 iter | `model_49.pt`，通过 |
+| `Mjlab-RollerCrouch-Flat-MicroDuck` | 32 env × 50 iter | `model_49.pt`，通过 |
+| `Mjlab-RollerSlope-Flat-MicroDuck` | 32 env × 50 iter | `model_49.pt`，通过 |
+| `Mjlab-RollerStandUp-Flat-MicroDuck` | 8 env × 50 iter | `model_49.pt`，通过（修复后） |
+| `Mjlab-Spin-Flat-MicroDuck` | 32 env × 50 iter | `model_49.pt`，通过 |
+| `Mjlab-Roulade-Flat-MicroDuck` | 32 env × 50 iter | `model_49.pt`，通过 |
+
+批次使用 `WANDB_MODE=offline`、`env/agent seed=42` 和 TensorBoard logger，任务串行执行以控制 4 GiB 显存；所有任务均退出码 `0` 并生成 checkpoint。完整命令可按下面模板替换任务 ID：
+
+```bash
+cd codes/practices/humanoid/microduck-rl
+WANDB_MODE=offline uv run train Mjlab-Velocity-Flat-MicroDuck \
+  --env.scene.num-envs 32 --env.seed 42 --agent.seed 42 \
+  --agent.max-iterations 50 --agent.save-interval 50 \
+  --agent.logger tensorboard --agent.experiment-name mode_matrix_smoke \
+  --agent.upload-model False
+```
+
+其中 `RollerStandUp` 首次运行暴露了一个真实的配置 bug：滚轮模型的奖励使用了包含被动轮关节的 articulated 索引，而 pose reward 直接索引 14D servo 张量，触发 CUDA index-out-of-bounds。现已在 `src/mjlab_microduck/tasks/mdp.py` 增加 articulated→servo 映射；修复后 8 env × 50 iter 通过，`standing_composite` 和高度奖励正常出现。该矩阵仍然是“每个任务能独立训练并产出轨迹”的 smoke，不代表 18 个策略都已收敛；要验收稳定动作，需要按任务分别续训到数百至数千 iterations，并为每个 checkpoint 做固定命令的离屏回放。
+
 ### 回归测试
 
 项目还提供 CPU 可运行的配置不变量、奖励函数和 NaN 防护测试：

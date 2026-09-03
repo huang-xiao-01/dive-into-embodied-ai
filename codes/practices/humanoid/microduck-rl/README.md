@@ -62,6 +62,21 @@ uv run play Mjlab-Velocity-Flat-MicroDuck \
 
 这只是 checkpoint 加载和推理链路 demo；5 iteration 不代表策略已经收敛为稳定步态。
 
+## 多模式独立训练矩阵
+
+项目中的动作模式使用独立 PPO 策略；共享的是 61D actor observation / 14D action 接口，不共享最终网络权重。2026-09-03 在当前 CUDA 12.2 兼容环境中完成了 18 个任务族的独立启动验证：其中 16 个任务使用 32 env × 50 iterations，`StandUp-Flat` 使用此前已通过的 32 env × 10 iterations，`RollerStandUp-Flat` 在修复索引映射后使用 8 env × 50 iterations。所有 run 均退出码 0 并生成独立 checkpoint（日志和 checkpoint 保留在本地 `logs/`，不提交 Git）。
+
+```bash
+cd codes/practices/humanoid/microduck-rl
+WANDB_MODE=offline uv run train Mjlab-Velocity-Flat-MicroDuck \
+  --env.scene.num-envs 32 --env.seed 42 --agent.seed 42 \
+  --agent.max-iterations 50 --agent.save-interval 50 \
+  --agent.logger tensorboard --agent.experiment-name mode_matrix_smoke \
+  --agent.upload-model False
+```
+
+将命令中的任务 ID 替换为 `list-envs | grep MicroDuck` 输出的其他任务即可逐个训练。50 iterations 只证明任务可以独立构建、stepping 和保存 checkpoint；它不等同于动作收敛。稳定步态需要各策略分别续训，并分别检查 episode length、跌倒终止和离屏回放。
+
 CPU 侧的配置与奖励回归测试：
 
 ```bash
