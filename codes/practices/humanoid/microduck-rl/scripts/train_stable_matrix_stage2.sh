@@ -77,7 +77,10 @@ for spec in "${tasks[@]}"; do
   checkpoint_name="${checkpoint##*/}"
   current="${checkpoint_name#model_}"
   current="${current%.pt}"
-  additional=$((target - current))
+  # runner.learn() iterates from current_learning_iteration up to (but not
+  # including) current + num_learning_iterations, then saves the final `it`.
+  # Therefore reaching model_${target}.pt requires target-current+1 updates.
+  additional=$((target - current + 1))
   if (( additional <= 0 )); then
     printf '%s\talready-at-%s\t%s\t%s\t0\n' "$task" "$current" "${checkpoint%/*}" "$checkpoint_name" >> "$status_file"
     continue
