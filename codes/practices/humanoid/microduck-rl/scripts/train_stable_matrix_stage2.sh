@@ -80,11 +80,11 @@ for spec in "${tasks[@]}"; do
   # runner.learn() iterates from current_learning_iteration up to (but not
   # including) current + num_learning_iterations, then saves the final `it`.
   # Therefore reaching model_${target}.pt requires target-current+1 updates.
-  additional=$((target - current + 1))
-  if (( additional <= 0 )); then
+  if (( current >= target )); then
     printf '%s\talready-at-%s\t%s\t%s\t0\n' "$task" "$current" "${checkpoint%/*}" "$checkpoint_name" >> "$status_file"
     continue
   fi
+  additional=$((target - current + 1))
 
   # Stage the checkpoint under the same experiment so mjlab's --load-run
   # resolver can load it, even when it originated from the smoke experiment.
