@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the designed arm-enabled MicroDuck laugh choreography.
+"""Render the designed arm-enabled MicroDuck supine laugh choreography.
 
 This is a deterministic reference clip for reviewing the motion design while
 the phase-conditioned RL policy is still being trained.  It uses the same
@@ -19,7 +19,12 @@ import numpy as np
 
 from mjlab_microduck.tasks.microduck_laugh_choreo_env_cfg import (
     LAUGH_KEYFRAMES,
-    TRUNK_LEAN_KEYFRAMES,
+    LEFT_FOOT_TAP_END,
+    LEFT_FOOT_TAP_START,
+    RIGHT_FOOT_TAP_END,
+    RIGHT_FOOT_TAP_START,
+    ROOT_PITCH_KEYFRAMES,
+    ROOT_Z_KEYFRAMES,
 )
 
 
@@ -39,21 +44,19 @@ def _interpolate_pose(phase: float) -> dict[str, float]:
     return dict(LAUGH_KEYFRAMES[-1][1])
 
 
-def _interpolate_lean(phase: float) -> float:
-    for (lo, lean_lo), (hi, lean_hi) in zip(
-        TRUNK_LEAN_KEYFRAMES, TRUNK_LEAN_KEYFRAMES[1:]
-    ):
+def _interpolate_scalar(phase: float, keyframes: tuple) -> float:
+    for (lo, value_lo), (hi, value_hi) in zip(keyframes, keyframes[1:]):
         if lo <= phase <= hi:
             weight = _smoothstep((phase - lo) / (hi - lo))
-            return lean_lo + weight * (lean_hi - lean_lo)
-    return float(TRUNK_LEAN_KEYFRAMES[-1][1])
+            return value_lo + weight * (value_hi - value_lo)
+    return float(keyframes[-1][1])
 
 
 def _camera() -> mujoco.MjvCamera:
     camera = mujoco.MjvCamera()
     mujoco.mjv_defaultCamera(camera)
     camera.type = mujoco.mjtCamera.mjCAMERA_FREE
-    camera.lookat[:] = (0.0, 0.0, 0.09)
+    camera.lookat[:] = (0.0, 0.0, 0.08)
     camera.distance = 0.48
     # A front-side view keeps both arms visible while retaining enough depth
     # to read the forward/backward body throw.
@@ -85,6 +88,15 @@ def render(output: Path, frames: int, width: int, height: int) -> dict[str, floa
         mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "left_hand"),
         mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "right_hand"),
     ]
+    foot_sites = [
+        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "left_foot"),
+        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "right_foot"),
+    ]
+    foot_geoms = [
+        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "left_foot_collision"),
+        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_foot_collision"),
+    ]
+    floor_geom = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "reference_floor")
     root_joint = mujoco.mj_name2id(
         model, mujoco.mjtObj.mjOBJ_JOINT, "trunk_base_freejoint"
     )
@@ -103,7 +115,9 @@ def render(output: Path, frames: int, width: int, height: int) -> dict[str, floa
     max_hand_z = float("-inf")
     min_root_z = float("inf")
     max_root_z = float("-inf")
-    tap_contact_frames = [0, 0]
+    foot_tap_contact_frames = [0, 0]
+    foot_z_min = [float("inf"), float("inf")]
+    foot_z_max = [float("-inf"), float("-inf")]
     try:
         for frame_index in range(frames):
             phase = (frame_index % frames) / frames
@@ -111,25 +125,37 @@ def render(output: Path, frames: int, width: int, height: int) -> dict[str, floa
             for name, value in pose.items():
                 data.qpos[joint_ids[name]] = value
 
-            # A small scripted pitch makes the forward laugh and backward
-            # throw read clearly in the reference clip.  Tap frames return to
-            # neutral so both palms can visibly meet the floor.
-            lean = 1.6 * _interpolate_lean(phase)
+            # The root is free in the MJCF.  The reference therefore applies
+            # the validated 90-degree backward orientation directly while the
+            # RL task learns the same target through projected gravity.
+            root_pitch = _interpolate_scalar(phase, ROOT_PITCH_KEYFRAMES)
+            data.qpos[root_qpos + 2] = _interpolate_scalar(phase, ROOT_Z_KEYFRAMES)
             data.qpos[root_qpos + 3 : root_qpos + 7] = (
-                np.cos(lean / 2.0), 0.0, np.sin(lean / 2.0), 0.0
+                np.cos(root_pitch / 2.0), 0.0, np.sin(root_pitch / 2.0), 0.0
             )
             mujoco.mj_forward(model, data)
 
             hand_z = data.site_xpos[hand_sites, 2]
+            foot_z = data.site_xpos[foot_sites, 2]
             min_hand_z = min(min_hand_z, float(hand_z.min()))
             max_hand_z = max(max_hand_z, float(hand_z.max()))
+            for index, value in enumerate(foot_z):
+                foot_z_min[index] = min(foot_z_min[index], float(value))
+                foot_z_max[index] = max(foot_z_max[index], float(value))
             root_z = float(data.qpos[root_qpos + 2])
             min_root_z = min(min_root_z, root_z)
             max_root_z = max(max_root_z, root_z)
-            if 0.72 <= phase < 0.82 and hand_z[0] <= 0.014:
-                tap_contact_frames[0] += 1
-            if 0.84 <= phase < 0.94 and hand_z[1] <= 0.014:
-                tap_contact_frames[1] += 1
+            for index, (start, end) in enumerate(
+                (
+                    (LEFT_FOOT_TAP_START, LEFT_FOOT_TAP_END),
+                    (RIGHT_FOOT_TAP_START, RIGHT_FOOT_TAP_END),
+                )
+            ):
+                distance = mujoco.mj_geomDistance(
+                    model, data, foot_geoms[index], floor_geom, 1.0, np.zeros(6)
+                )
+                if start <= phase < end and distance <= 0.0:
+                    foot_tap_contact_frames[index] += 1
 
             renderer.update_scene(data, camera=camera)
             writer.append_data(renderer.render())
@@ -144,11 +170,15 @@ def render(output: Path, frames: int, width: int, height: int) -> dict[str, floa
         "max_root_z_m": max_root_z,
         "min_hand_z_m": min_hand_z,
         "max_hand_z_m": max_hand_z,
-        "left_tap_contact_frames": float(tap_contact_frames[0]),
-        "right_tap_contact_frames": float(tap_contact_frames[1]),
+        "left_foot_min_z_m": foot_z_min[0],
+        "left_foot_max_z_m": foot_z_max[0],
+        "right_foot_min_z_m": foot_z_min[1],
+        "right_foot_max_z_m": foot_z_max[1],
+        "left_foot_tap_contact_frames": float(foot_tap_contact_frames[0]),
+        "right_foot_tap_contact_frames": float(foot_tap_contact_frames[1]),
     }
     output.with_suffix(".json").write_text(
-        json.dumps({"type": "kinematic_reference", "stats": stats}, indent=2)
+        json.dumps({"type": "kinematic_reference_supine", "stats": stats}, indent=2)
     )
     print(json.dumps(stats, indent=2))
     print(f"saved {output}")

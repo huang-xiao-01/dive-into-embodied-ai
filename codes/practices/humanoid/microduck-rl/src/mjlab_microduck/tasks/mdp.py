@@ -3087,6 +3087,43 @@ def laugh_alternating_hand_contact_reward(
     return (correct - 0.5 * wrong) * active.float()
 
 
+def laugh_alternating_foot_contact_reward(
+    env: ManagerBasedRlEnv,
+    sensor_name: str,
+    command_name: str = "twist",
+    left_start: float = 0.48,
+    left_end: float = 0.56,
+    right_start: float = 0.64,
+    right_end: float = 0.72,
+    right_weight: float = 1.0,
+) -> torch.Tensor:
+    """Reward the expected foot touching the floor during the supine laugh.
+
+    The supine choreography intentionally gives up the normal ``both feet
+    grounded`` objective.  This term provides the phase-specific replacement:
+    one foot taps the floor, lifts, and then the other foot taps it.
+    """
+    if sensor_name not in env.scene.sensors:
+        return torch.zeros(env.num_envs, device=env.device)
+    cmd = env.command_manager.get_command(command_name)
+    phase = (torch.atan2(cmd[:, 1], cmd[:, 0]) / (2 * torch.pi)) % 1.0
+    sensor = env.scene.sensors[sensor_name]
+    found = sensor.data.found
+    if found.dim() == 3:
+        found = found.any(dim=-1)
+    found = found.bool()
+    if found.shape[1] < 2:
+        return torch.zeros(env.num_envs, device=env.device)
+    left_expected = (phase >= left_start) & (phase < left_end)
+    right_expected = (phase >= right_start) & (phase < right_end)
+    left = found[:, 0]
+    right = found[:, 1]
+    correct = left.float() * left_expected.float() + right_weight * right.float() * right_expected.float()
+    wrong = right.float() * left_expected.float() + left.float() * right_expected.float()
+    active = left_expected | right_expected
+    return (correct - 0.5 * wrong) * active.float()
+
+
 def laugh_hand_height_track(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",
@@ -3111,6 +3148,64 @@ def laugh_hand_height_track(
     return left_score * left_expected.float() + right_score * right_expected.float()
 
 
+def laugh_foot_height_track(
+    env: ManagerBasedRlEnv,
+    command_name: str = "twist",
+    left_start: float = 0.48,
+    left_end: float = 0.56,
+    right_start: float = 0.64,
+    right_end: float = 0.72,
+    target_height: float = 0.012,
+    std: float = 0.025,
+    right_weight: float = 1.0,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Give a dense gradient for lowering the expected tapping foot."""
+    asset: Entity = env.scene[asset_cfg.name]
+    site_ids = asset.find_sites(list(asset_cfg.site_names))[0]
+    foot_z = asset.data.site_pos_w[:, site_ids, 2]
+    cmd = env.command_manager.get_command(command_name)
+    phase = (torch.atan2(cmd[:, 1], cmd[:, 0]) / (2 * torch.pi)) % 1.0
+    left_expected = (phase >= left_start) & (phase < left_end)
+    right_expected = (phase >= right_start) & (phase < right_end)
+    left_score = torch.exp(-((foot_z[:, 0] - target_height) / std) ** 2)
+    right_score = torch.exp(-((foot_z[:, 1] - target_height) / std) ** 2)
+    return left_score * left_expected.float() + right_weight * right_score * right_expected.float()
+
+
+def laugh_root_height_track(
+    env: ManagerBasedRlEnv,
+    command_name: str = "twist",
+    keyframes: tuple = ((0.0, 0.12), (1.0, 0.12)),
+    std: float = 0.025,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Track the root height of the phase-indexed stand-to-supine motion."""
+    if len(keyframes) < 2:
+        raise ValueError("laugh root height needs at least two keyframes")
+    phases = [float(item[0]) for item in keyframes]
+    if phases[0] != 0.0 or phases[-1] != 1.0 or any(
+        not (lo < hi) for lo, hi in zip(phases, phases[1:])
+    ):
+        raise ValueError("laugh root height phases must be increasing from 0 to 1")
+
+    asset: Entity = env.scene[asset_cfg.name]
+    cmd = env.command_manager.get_command(command_name)
+    phase = (torch.atan2(cmd[:, 1], cmd[:, 0]) / (2 * torch.pi)) % 1.0
+    target = torch.full_like(phase, float(keyframes[0][1]))
+    values = torch.tensor(
+        [float(value) for _, value in keyframes], device=phase.device, dtype=phase.dtype
+    )
+    for index, (lo, hi) in enumerate(zip(phases, phases[1:])):
+        w = ((phase - lo) / (hi - lo)).clamp(0.0, 1.0)
+        w = w * w * (3.0 - 2.0 * w)
+        candidate = values[index] + w * (values[index + 1] - values[index])
+        in_segment = (phase >= lo) & (phase <= hi)
+        target = torch.where(in_segment, candidate, target)
+    root_z = asset.data.root_link_pos_w[:, 2] - env.scene.env_origins[:, 2]
+    return torch.exp(-((root_z - target) / std) ** 2)
+
+
 def laugh_trunk_lean_track(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",
@@ -3118,11 +3213,12 @@ def laugh_trunk_lean_track(
     std: float = 0.10,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-    """Track the forward-then-back trunk lean in the laugh choreography.
+    """Track the trunk pitch proxy in the laugh choreography.
 
     The projected gravity x component is a pitch proxy: positive is forward
-    for this robot.  The small target angles keep the gesture readable while
-    preserving a recoverable support margin.
+    for this robot.  It also supports the full supine target (approximately
+    -1.0 for a 90-degree backward lay-down), so the upright reward and
+    ``fell_over`` termination must be disabled for that choreography.
     """
     if len(keyframes) < 2:
         raise ValueError("laugh trunk lean needs at least two keyframes")

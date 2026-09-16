@@ -165,8 +165,16 @@ def render(
         gif_writer = imageio.get_writer(gif, mode="I", duration=0.05, loop=0)
 
     robot = env.scene["robot"]
+    foot_site_ids = robot.find_sites(["left_foot", "right_foot"])[0]
+    feet_sensor = env.scene.sensors.get("feet_ground_contact")
     min_z = float("inf")
     min_upright = float("inf")
+    min_pitch_proxy = float("inf")
+    max_pitch_proxy = float("-inf")
+    min_foot_z = [float("inf"), float("inf")]
+    max_foot_z = [float("-inf"), float("-inf")]
+    foot_contact_frames = [0, 0]
+    expected_foot_contact_frames = [0, 0]
     done_count = 0
     fell_like_frames = 0
     try:
@@ -198,12 +206,38 @@ def render(
 
                 pos = robot.data.root_link_pos_w[0]
                 quat = robot.data.root_link_quat_w[0]
+                foot_z = robot.data.site_pos_w[0, foot_site_ids, 2]
                 trunk_z = float(pos[2].item())
                 # Quaternion convention is [w, x, y, z].  This is the world
                 # gravity z component expressed in the body frame.
                 upright = float(1.0 - 2.0 * (quat[1].item() ** 2 + quat[2].item() ** 2))
+                pitch_proxy = float(robot.data.projected_gravity_b[0, 0].item())
                 min_z = min(min_z, trunk_z)
                 min_upright = min(min_upright, upright)
+                min_pitch_proxy = min(min_pitch_proxy, pitch_proxy)
+                max_pitch_proxy = max(max_pitch_proxy, pitch_proxy)
+                for index, value in enumerate(foot_z):
+                    min_foot_z[index] = min(min_foot_z[index], float(value.item()))
+                    max_foot_z[index] = max(max_foot_z[index], float(value.item()))
+                if feet_sensor is not None and feet_sensor.data.found is not None:
+                    found = feet_sensor.data.found[0]
+                    if found.ndim == 2:
+                        found = found.any(dim=-1)
+                    for index in range(min(2, found.shape[0])):
+                        foot_contact_frames[index] += int(bool(found[index].item()))
+                    if "laughchoreo" in task.lower() or "laugh_choreo" in task.lower():
+                        phase = float(
+                            (torch.atan2(
+                                env.command_manager.get_command("twist")[0, 1],
+                                env.command_manager.get_command("twist")[0, 0],
+                            )
+                            / (2.0 * torch.pi))
+                            % 1.0
+                        )
+                        windows = ((0.48, 0.56), (0.64, 0.72))
+                        for index, (start, end) in enumerate(windows):
+                            if start <= phase < end and bool(found[index].item()):
+                                expected_foot_contact_frames[index] += 1
                 if trunk_z < 0.08 or upright < 0.35:
                     fell_like_frames += 1
 
@@ -225,6 +259,16 @@ def render(
         "done_count": float(done_count),
         "min_trunk_z_m": min_z,
         "min_upright_proxy": min_upright,
+        "min_pitch_proxy": min_pitch_proxy,
+        "max_pitch_proxy": max_pitch_proxy,
+        "left_foot_min_z_m": min_foot_z[0],
+        "left_foot_max_z_m": max_foot_z[0],
+        "right_foot_min_z_m": min_foot_z[1],
+        "right_foot_max_z_m": max_foot_z[1],
+        "left_foot_contact_frames": float(foot_contact_frames[0]),
+        "right_foot_contact_frames": float(foot_contact_frames[1]),
+        "left_expected_tap_contact_frames": float(expected_foot_contact_frames[0]),
+        "right_expected_tap_contact_frames": float(expected_foot_contact_frames[1]),
         "fell_like_frames": float(fell_like_frames),
         "fell_like_fraction": fell_like_frames / max(frames, 1),
     }

@@ -3,9 +3,10 @@
 The legacy laugh task stays on the original 14-servo robot.  This task uses a
 separate 18-servo XML with procedural arms, allowing the policy to learn the
 visible sequence requested for the tutorial: belly-hug and forward laugh,
-throw the body back, then alternate left/right palm and foot taps.
+throw the body all the way onto its back, then alternate left/right foot taps.
 """
 
+import math
 from copy import deepcopy
 
 from mjlab.managers import RewardTermCfg
@@ -54,8 +55,8 @@ HOME_POSE = _pose(
     right_ankle=-0.4530,
 )
 
-# The first half reads as “捧腹前仰后倒”; the second half synchronizes the
-# corresponding hand and foot in two distinct tap windows.
+# The first half reads as “捧腹前仰后倒”.  Once the trunk is horizontal, the
+# arms stay folded on the belly and the feet perform the visible taps.
 HUG_POSE = {**HOME_POSE, "left_shoulder_pitch": 1.05, "left_elbow_pitch": -1.85,
             "right_shoulder_pitch": 1.05, "right_elbow_pitch": -1.85}
 FORWARD_POSE = {
@@ -85,42 +86,43 @@ BACK_POSE = {
     "head_roll": 0.08,
 }
 LEFT_TAP_POSE = {
-    **BACK_POSE,
-    "left_shoulder_pitch": 0.0,
-    "left_elbow_pitch": 0.0,
-    "right_shoulder_pitch": 1.05,
-    "right_elbow_pitch": -1.85,
-    "left_knee": -0.15,
-    "left_ankle": 0.58,
-    "right_knee": 0.08,
-    "right_ankle": -0.50,
-    "head_yaw": 0.14,
+    **HUG_POSE,
+    # Validated against the actual left sole collision geometry at the
+    # horizontal root pose; the other leg stays in the raised supine pose.
+    "left_hip_yaw": 0.1721,
+    "left_hip_roll": -0.1575,
+    "left_hip_pitch": 0.3445,
+    "left_knee": -0.3685,
+    "left_ankle": -1.4933,
 }
 RIGHT_TAP_POSE = {
-    **BACK_POSE,
-    "left_shoulder_pitch": 1.05,
-    "left_elbow_pitch": -1.85,
-    "right_shoulder_pitch": 0.0,
-    "right_elbow_pitch": 0.0,
-    "left_knee": -0.08,
-    "left_ankle": 0.50,
-    "right_knee": 0.15,
-    "right_ankle": -0.58,
-    "head_yaw": -0.14,
+    **HUG_POSE,
+    # Counterpart validated against the right sole collision geometry.
+    "right_hip_yaw": -0.2365,
+    "right_hip_roll": 0.3702,
+    "right_hip_pitch": 0.4368,
+    "right_knee": 1.2200,
+    "right_ankle": 0.9791,
 }
+
+# Keep the arms folded over the belly after the fall.  The base leg pose leaves
+# both feet visibly raised; each tap pose above brings exactly one sole down.
+SUPINE_POSE = {**HUG_POSE}
 
 LAUGH_KEYFRAMES = (
     (0.00, HOME_POSE),
-    (0.12, HUG_POSE),
-    (0.29, FORWARD_POSE),
-    (0.45, BACK_POSE),
-    (0.58, BACK_POSE),
-    (0.68, BACK_POSE),
-    (0.72, LEFT_TAP_POSE),
-    (0.80, LEFT_TAP_POSE),
-    (0.84, RIGHT_TAP_POSE),
-    (0.92, RIGHT_TAP_POSE),
-    (0.96, HUG_POSE),
+    (0.10, HUG_POSE),
+    (0.20, FORWARD_POSE),
+    (0.30, BACK_POSE),
+    (0.40, SUPINE_POSE),
+    (0.48, LEFT_TAP_POSE),
+    (0.56, LEFT_TAP_POSE),
+    (0.60, SUPINE_POSE),
+    (0.64, RIGHT_TAP_POSE),
+    (0.72, RIGHT_TAP_POSE),
+    (0.76, SUPINE_POSE),
+    (0.90, SUPINE_POSE),
+    (0.98, HUG_POSE),
     (1.00, HOME_POSE),
 )
 
@@ -138,23 +140,48 @@ BODY_JOINTS = tuple(name for name in HOME_POSE if name not in ARM_JOINTS)
 BODY_HOME_POSE = {name: HOME_POSE[name] for name in BODY_JOINTS}
 BODY_LOCK_KEYFRAMES = ((0.0, BODY_HOME_POSE), (1.0, BODY_HOME_POSE))
 
-# Projected-gravity x targets: upright → forward laugh → gentle backward throw
-# → upright before the alternating taps.  Values are dimensionless sin(pitch)
-# proxies, roughly 6–9 degrees at the extrema.
+# Projected-gravity x targets: upright → forward laugh → full backward lay-down
+# → upright recovery.  Values are dimensionless pitch proxies; -1.0 is the
+# measured value at the validated -90-degree supine root orientation.
 TRUNK_LEAN_KEYFRAMES = (
     (0.00, 0.00),
-    (0.12, 0.00),
-    (0.29, 0.12),
-    (0.45, -0.10),
-    (0.58, -0.10),
-    (0.68, -0.10),
-    (0.72, 0.00),
-    (0.80, 0.00),
-    (0.84, 0.00),
-    (0.92, 0.00),
-    (0.96, 0.00),
+    (0.10, 0.00),
+    (0.20, 0.12),
+    (0.30, -0.10),
+    (0.40, -1.00),
+    (0.48, -1.00),
+    (0.56, -1.00),
+    (0.64, -1.00),
+    (0.72, -1.00),
+    (0.90, -1.00),
+    (0.98, 0.00),
     (1.00, 0.00),
 )
+
+# Reference renderer targets.  The root is free rather than actuated, so these
+# are kept separate from the joint reward's projected-gravity proxy.
+ROOT_PITCH_KEYFRAMES = (
+    (0.00, 0.00),
+    (0.20, 0.00),
+    (0.30, -0.10),
+    (0.40, -math.pi / 2.0),
+    (0.90, -math.pi / 2.0),
+    (0.98, 0.00),
+    (1.00, 0.00),
+)
+ROOT_Z_KEYFRAMES = (
+    (0.00, 0.120),
+    (0.30, 0.120),
+    (0.40, 0.055),
+    (0.90, 0.055),
+    (0.98, 0.120),
+    (1.00, 0.120),
+)
+
+LEFT_FOOT_TAP_START = 0.48
+LEFT_FOOT_TAP_END = 0.56
+RIGHT_FOOT_TAP_START = 0.64
+RIGHT_FOOT_TAP_END = 0.72
 
 
 def make_microduck_laugh_choreo_env_cfg(play: bool = False, rough: bool = False):
@@ -228,10 +255,10 @@ def make_microduck_laugh_choreo_env_cfg(play: bool = False, rough: bool = False)
         params={
             "sensor_name": hands_ground_cfg.name,
             "command_name": "twist",
-            "left_start": 0.72,
-            "left_end": 0.82,
-            "right_start": 0.84,
-            "right_end": 0.94,
+            "left_start": LEFT_FOOT_TAP_START,
+            "left_end": LEFT_FOOT_TAP_END,
+            "right_start": RIGHT_FOOT_TAP_START,
+            "right_end": RIGHT_FOOT_TAP_END,
         },
     )
     cfg.rewards["laugh_hand_height"] = RewardTermCfg(
@@ -239,14 +266,44 @@ def make_microduck_laugh_choreo_env_cfg(play: bool = False, rough: bool = False)
         weight=30.0,
         params={
             "command_name": "twist",
-            "left_start": 0.72,
-            "left_end": 0.82,
-            "right_start": 0.84,
-            "right_end": 0.94,
+            "left_start": LEFT_FOOT_TAP_START,
+            "left_end": LEFT_FOOT_TAP_END,
+            "right_start": RIGHT_FOOT_TAP_START,
+            "right_end": RIGHT_FOOT_TAP_END,
             "target_height": 0.011,
             "std": 0.025,
             "asset_cfg": SceneEntityCfg(
                 "robot", site_names=("left_hand", "right_hand")
+            ),
+        },
+    )
+    cfg.rewards["laugh_foot_taps"] = RewardTermCfg(
+        func=microduck_mdp.laugh_alternating_foot_contact_reward,
+        weight=28.0,
+        params={
+            "sensor_name": "feet_ground_contact",
+            "command_name": "twist",
+            "left_start": LEFT_FOOT_TAP_START,
+            "left_end": LEFT_FOOT_TAP_END,
+            "right_start": RIGHT_FOOT_TAP_START,
+            "right_end": RIGHT_FOOT_TAP_END,
+            "right_weight": 2.0,
+        },
+    )
+    cfg.rewards["laugh_foot_height"] = RewardTermCfg(
+        func=microduck_mdp.laugh_foot_height_track,
+        weight=35.0,
+        params={
+            "command_name": "twist",
+            "left_start": LEFT_FOOT_TAP_START,
+            "left_end": LEFT_FOOT_TAP_END,
+            "right_start": RIGHT_FOOT_TAP_START,
+            "right_end": RIGHT_FOOT_TAP_END,
+            "target_height": 0.012,
+            "std": 0.025,
+            "right_weight": 2.0,
+            "asset_cfg": SceneEntityCfg(
+                "robot", site_names=("left_foot", "right_foot")
             ),
         },
     )
@@ -261,15 +318,30 @@ def make_microduck_laugh_choreo_env_cfg(play: bool = False, rough: bool = False)
         },
     )
 
-    # During the tap section one foot/hand pair is intentionally moving.  Keep
-    # support and flatness as soft stabilizers rather than forcing both feet to
-    # remain planted throughout the whole gesture.
-    cfg.rewards["feet_grounded"].weight = 0.8
-    cfg.rewards["feet_flat"].weight = -0.8
-    cfg.rewards["action_rate_l2"].weight = -0.55 if not play else -0.75
-    cfg.rewards["joint_torques_l2"].weight = -3e-3
+    # This gesture deliberately enters the orientation that velocity tasks
+    # call a fall.  Standing-specific terms would fight the choreography, so
+    # disable them for the full-lie task and rely on the phase targets below.
+    cfg.terminations.pop("fell_over", None)
+    cfg.rewards["upright"].weight = 0.0
+    cfg.rewards["feet_grounded"].weight = 0.0
+    cfg.rewards["feet_flat"].weight = 0.0
+    cfg.rewards["laugh_hand_taps"].weight = 0.0
+    cfg.rewards["laugh_hand_height"].weight = 0.0
+    cfg.rewards["laugh_trunk_lean"].weight = 8.0
+    cfg.rewards["laugh_trunk_lean"].params["std"] = 0.18
+    cfg.rewards["laugh_root_height"] = RewardTermCfg(
+        func=microduck_mdp.laugh_root_height_track,
+        weight=5.0,
+        params={
+            "command_name": "twist",
+            "keyframes": ROOT_Z_KEYFRAMES,
+            "std": 0.025,
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+    cfg.rewards["action_rate_l2"].weight = -0.40 if not play else -0.55
+    cfg.rewards["joint_torques_l2"].weight = -2e-3
     cfg.rewards["self_collisions"].weight = -1.5
-    cfg.rewards["upright"].weight = 1.0
 
     command = cfg.commands["twist"]
     cfg.commands["twist"] = microduck_mdp.GroundPickPhaseCommandCfg(
