@@ -193,7 +193,7 @@ def render(output: Path, frames: int, width: int, height: int) -> dict[str, floa
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--frames", type=int, default=350)
+    parser.add_argument("--frames", type=int, default=500)
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=360)
     args = parser.parse_args()

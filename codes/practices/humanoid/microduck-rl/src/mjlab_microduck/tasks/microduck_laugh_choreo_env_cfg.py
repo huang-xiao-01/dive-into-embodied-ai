@@ -23,7 +23,7 @@ from mjlab_microduck.tasks.microduck_laugh_env_cfg import (
 )
 
 
-LAUGH_CHOREO_PERIOD = 7.0
+LAUGH_CHOREO_PERIOD = 10.0
 
 
 def _pose(**values: float) -> dict[str, float]:
@@ -122,34 +122,34 @@ SUPINE_POSE = {**HUG_POSE}
 # gaps between windows are intentional: they give the lifted side room to
 # leave the floor before the other side lands.
 TAP_WINDOWS = (
-    (0.66, 0.69, "left"),
-    (0.71, 0.74, "right"),
-    (0.76, 0.79, "left"),
-    (0.81, 0.84, "right"),
-    (0.86, 0.89, "left"),
-    (0.91, 0.94, "right"),
+    (0.68, 0.701, "left"),
+    (0.72, 0.741, "right"),
+    (0.76, 0.781, "left"),
+    (0.80, 0.821, "right"),
+    (0.84, 0.861, "left"),
+    (0.88, 0.901, "right"),
 )
 
 LAUGH_KEYFRAMES = (
     (0.00, HOME_POSE),
     (0.08, HUG_POSE),
     (0.20, FORWARD_POSE),
-    (0.34, FORWARD_POSE),
-    (0.42, BACK_POSE),
-    (0.58, BACK_POSE),
-    (0.64, SUPINE_POSE),
-    (0.66, LEFT_TAP_POSE),
-    (0.69, LEFT_TAP_POSE),
-    (0.71, RIGHT_TAP_POSE),
-    (0.74, RIGHT_TAP_POSE),
+    (0.38, FORWARD_POSE),
+    (0.46, BACK_POSE),
+    (0.64, BACK_POSE),
+    (0.66, SUPINE_POSE),
+    (0.68, LEFT_TAP_POSE),
+    (0.701, LEFT_TAP_POSE),
+    (0.72, RIGHT_TAP_POSE),
+    (0.741, RIGHT_TAP_POSE),
     (0.76, LEFT_TAP_POSE),
-    (0.79, LEFT_TAP_POSE),
-    (0.81, RIGHT_TAP_POSE),
-    (0.84, RIGHT_TAP_POSE),
-    (0.86, LEFT_TAP_POSE),
-    (0.89, LEFT_TAP_POSE),
-    (0.91, RIGHT_TAP_POSE),
-    (0.94, RIGHT_TAP_POSE),
+    (0.781, LEFT_TAP_POSE),
+    (0.80, RIGHT_TAP_POSE),
+    (0.821, RIGHT_TAP_POSE),
+    (0.84, LEFT_TAP_POSE),
+    (0.861, LEFT_TAP_POSE),
+    (0.88, RIGHT_TAP_POSE),
+    (0.901, RIGHT_TAP_POSE),
     (0.96, SUPINE_POSE),
     (0.98, HUG_POSE),
     (1.00, HOME_POSE),
@@ -176,10 +176,10 @@ TRUNK_LEAN_KEYFRAMES = (
     (0.00, 0.00),
     (0.08, 0.00),
     (0.20, 0.12),
-    (0.34, 0.12),
-    (0.42, -0.10),
-    (0.58, -0.10),
-    (0.64, -1.00),
+    (0.38, 0.12),
+    (0.46, -0.10),
+    (0.64, -0.10),
+    (0.66, -1.00),
     (0.96, -1.00),
     (0.98, 0.00),
     (1.00, 0.00),
@@ -190,18 +190,18 @@ TRUNK_LEAN_KEYFRAMES = (
 ROOT_PITCH_KEYFRAMES = (
     (0.00, 0.00),
     (0.20, 0.00),
-    (0.34, 0.00),
-    (0.42, -0.10),
-    (0.58, -0.10),
-    (0.64, -math.pi / 2.0),
+    (0.38, 0.00),
+    (0.46, -0.10),
+    (0.64, -0.10),
+    (0.66, -math.pi / 2.0),
     (0.96, -math.pi / 2.0),
     (0.98, 0.00),
     (1.00, 0.00),
 )
 ROOT_Z_KEYFRAMES = (
     (0.00, 0.120),
-    (0.58, 0.120),
-    (0.64, 0.055),
+    (0.64, 0.120),
+    (0.66, 0.055),
     (0.96, 0.055),
     (0.98, 0.120),
     (1.00, 0.120),
