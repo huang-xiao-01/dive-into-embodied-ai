@@ -21,6 +21,7 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.utils.torch import configure_torch_backends
+from mjlab_microduck.tasks.microduck_laugh_choreo_env_cfg import TAP_WINDOWS
 
 
 def _apply_clean_play_config(env_cfg, task: str) -> None:
@@ -135,6 +136,7 @@ def render(
     head_yaw: float,
     head_pitch: float,
     clean: bool,
+    render_frames: bool = True,
 ) -> dict[str, float]:
     configure_torch_backends()
     env_cfg = load_env_cfg(task, play=True)
@@ -157,24 +159,31 @@ def render(
     policy = runner.get_inference_policy(device=device)
     obs, _ = wrapped.reset()
 
-    mp4.parent.mkdir(parents=True, exist_ok=True)
-    writer = imageio.get_writer(mp4, fps=50, codec="libx264", quality=8)
+    writer = None
+    if render_frames:
+        mp4.parent.mkdir(parents=True, exist_ok=True)
+        writer = imageio.get_writer(mp4, fps=50, codec="libx264", quality=8)
     gif_writer = None
-    if gif is not None:
+    if render_frames and gif is not None:
         gif.parent.mkdir(parents=True, exist_ok=True)
         gif_writer = imageio.get_writer(gif, mode="I", duration=0.05, loop=0)
 
     robot = env.scene["robot"]
     foot_site_ids = robot.find_sites(["left_foot", "right_foot"])[0]
+    hand_site_ids = robot.find_sites(["left_hand", "right_hand"])[0]
     feet_sensor = env.scene.sensors.get("feet_ground_contact")
+    hands_sensor = env.scene.sensors.get("laugh_hand_ground_contact")
     min_z = float("inf")
     min_upright = float("inf")
     min_pitch_proxy = float("inf")
     max_pitch_proxy = float("-inf")
     min_foot_z = [float("inf"), float("inf")]
     max_foot_z = [float("-inf"), float("-inf")]
+    min_hand_z = [float("inf"), float("inf")]
+    max_hand_z = [float("-inf"), float("-inf")]
     foot_contact_frames = [0, 0]
     expected_foot_contact_frames = [0, 0]
+    expected_hand_contact_frames = [0, 0]
     done_count = 0
     fell_like_frames = 0
     try:
@@ -207,6 +216,7 @@ def render(
                 pos = robot.data.root_link_pos_w[0]
                 quat = robot.data.root_link_quat_w[0]
                 foot_z = robot.data.site_pos_w[0, foot_site_ids, 2]
+                hand_z = robot.data.site_pos_w[0, hand_site_ids, 2]
                 trunk_z = float(pos[2].item())
                 # Quaternion convention is [w, x, y, z].  This is the world
                 # gravity z component expressed in the body frame.
@@ -219,6 +229,9 @@ def render(
                 for index, value in enumerate(foot_z):
                     min_foot_z[index] = min(min_foot_z[index], float(value.item()))
                     max_foot_z[index] = max(max_foot_z[index], float(value.item()))
+                for index, value in enumerate(hand_z):
+                    min_hand_z[index] = min(min_hand_z[index], float(value.item()))
+                    max_hand_z[index] = max(max_hand_z[index], float(value.item()))
                 if feet_sensor is not None and feet_sensor.data.found is not None:
                     found = feet_sensor.data.found[0]
                     if found.ndim == 2:
@@ -234,21 +247,31 @@ def render(
                             / (2.0 * torch.pi))
                             % 1.0
                         )
-                        windows = ((0.48, 0.56), (0.64, 0.72))
-                        for index, (start, end) in enumerate(windows):
+                        for start, end, side in TAP_WINDOWS:
+                            index = 0 if side == "left" else 1
                             if start <= phase < end and bool(found[index].item()):
                                 expected_foot_contact_frames[index] += 1
+                        if hands_sensor is not None and hands_sensor.data.found is not None:
+                            hand_found = hands_sensor.data.found[0]
+                            if hand_found.ndim == 2:
+                                hand_found = hand_found.any(dim=-1)
+                            for start, end, side in TAP_WINDOWS:
+                                index = 0 if side == "left" else 1
+                                if start <= phase < end and bool(hand_found[index].item()):
+                                    expected_hand_contact_frames[index] += 1
                 if trunk_z < 0.08 or upright < 0.35:
                     fell_like_frames += 1
 
-                frame = env.render()
-                if frame is None:
-                    raise RuntimeError("mjlab did not return an RGB frame")
-                writer.append_data(frame)
-                if gif_writer is not None:
-                    gif_writer.append_data(frame)
+                if render_frames:
+                    frame = env.render()
+                    if frame is None:
+                        raise RuntimeError("mjlab did not return an RGB frame")
+                    writer.append_data(frame)
+                    if gif_writer is not None:
+                        gif_writer.append_data(frame)
     finally:
-        writer.close()
+        if writer is not None:
+            writer.close()
         if gif_writer is not None:
             gif_writer.close()
         wrapped.close()
@@ -265,16 +288,23 @@ def render(
         "left_foot_max_z_m": max_foot_z[0],
         "right_foot_min_z_m": min_foot_z[1],
         "right_foot_max_z_m": max_foot_z[1],
+        "left_hand_min_z_m": min_hand_z[0],
+        "left_hand_max_z_m": max_hand_z[0],
+        "right_hand_min_z_m": min_hand_z[1],
+        "right_hand_max_z_m": max_hand_z[1],
         "left_foot_contact_frames": float(foot_contact_frames[0]),
         "right_foot_contact_frames": float(foot_contact_frames[1]),
         "left_expected_tap_contact_frames": float(expected_foot_contact_frames[0]),
         "right_expected_tap_contact_frames": float(expected_foot_contact_frames[1]),
+        "left_expected_hand_tap_contact_frames": float(expected_hand_contact_frames[0]),
+        "right_expected_hand_tap_contact_frames": float(expected_hand_contact_frames[1]),
         "fell_like_frames": float(fell_like_frames),
         "fell_like_fraction": fell_like_frames / max(frames, 1),
     }
     mp4.with_suffix(".json").write_text(json.dumps({"task": task, "checkpoint": str(checkpoint), "seed": 42, "clean": clean, "stats": stats}, indent=2))
-    print(f"saved {mp4}")
-    if gif is not None:
+    if render_frames:
+        print(f"saved {mp4}")
+    if render_frames and gif is not None:
         print(f"saved {gif}")
     for key, value in stats.items():
         print(f"{key}: {value:.4f}")
@@ -302,6 +332,11 @@ def main() -> None:
         action="store_true",
         help="fixed action-demo reset with pushes and domain randomization disabled",
     )
+    parser.add_argument(
+        "--stats-only",
+        action="store_true",
+        help="run the physical rollout and write JSON without rendering video frames",
+    )
     args = parser.parse_args()
     if args.frames < 1:
         parser.error("--frames must be positive")
@@ -321,6 +356,7 @@ def main() -> None:
         args.head_yaw,
         args.head_pitch,
         args.clean,
+        not args.stats_only,
     )
 
 

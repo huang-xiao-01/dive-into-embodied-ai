@@ -2,8 +2,9 @@
 
 The legacy laugh task stays on the original 14-servo robot.  This task uses a
 separate 18-servo XML with procedural arms, allowing the policy to learn the
-visible sequence requested for the tutorial: belly-hug and forward laugh,
-throw the body all the way onto its back, then alternate left/right foot taps.
+visible sequence requested for the tutorial: a long belly-hug forward laugh,
+a held backward laugh, a full supine laugh with rapid alternating hand and
+foot taps, and a clean return to standing.
 """
 
 import math
@@ -22,7 +23,7 @@ from mjlab_microduck.tasks.microduck_laugh_env_cfg import (
 )
 
 
-LAUGH_CHOREO_PERIOD = 5.0
+LAUGH_CHOREO_PERIOD = 7.0
 
 
 def _pose(**values: float) -> dict[str, float]:
@@ -56,7 +57,7 @@ HOME_POSE = _pose(
 )
 
 # The first half reads as “捧腹前仰后倒”.  Once the trunk is horizontal, the
-# arms stay folded on the belly and the feet perform the visible taps.
+# arms and feet perform the rapid alternating taps.
 HUG_POSE = {**HOME_POSE, "left_shoulder_pitch": 1.05, "left_elbow_pitch": -1.85,
             "right_shoulder_pitch": 1.05, "right_elbow_pitch": -1.85}
 FORWARD_POSE = {
@@ -87,13 +88,17 @@ BACK_POSE = {
 }
 LEFT_TAP_POSE = {
     **HUG_POSE,
-    # Validated against the actual left sole collision geometry at the
-    # horizontal root pose; the other leg stays in the raised supine pose.
+    # The leg values were validated against the actual left sole collision
+    # geometry at the horizontal root pose.
     "left_hip_yaw": 0.1721,
     "left_hip_roll": -0.1575,
     "left_hip_pitch": 0.3445,
     "left_knee": -0.3685,
     "left_ankle": -1.4933,
+    # The left palm taps while the right arm stays folded over the belly.
+    # This is a small move from HUG_POSE, so the fast window remains learnable.
+    "left_shoulder_pitch": 1.22,
+    "left_elbow_pitch": -1.30,
 }
 RIGHT_TAP_POSE = {
     **HUG_POSE,
@@ -103,25 +108,49 @@ RIGHT_TAP_POSE = {
     "right_hip_pitch": 0.4368,
     "right_knee": 1.2200,
     "right_ankle": 0.9791,
+    # The right palm taps while the left arm stays folded over the belly.
+    "right_shoulder_pitch": 1.22,
+    "right_elbow_pitch": -1.30,
 }
 
-# Keep the arms folded over the belly after the fall.  The base leg pose leaves
-# both feet visibly raised; each tap pose above brings exactly one sole down.
+# The base leg pose leaves both feet visibly raised; each tap pose above brings
+# exactly one sole and the matching palm down.
 SUPINE_POSE = {**HUG_POSE}
+
+# Six short windows make the taps read as a fast left-right-left-right sequence.
+# Each window is shared by the hand and foot contact/height terms. The small
+# gaps between windows are intentional: they give the lifted side room to
+# leave the floor before the other side lands.
+TAP_WINDOWS = (
+    (0.66, 0.69, "left"),
+    (0.71, 0.74, "right"),
+    (0.76, 0.79, "left"),
+    (0.81, 0.84, "right"),
+    (0.86, 0.89, "left"),
+    (0.91, 0.94, "right"),
+)
 
 LAUGH_KEYFRAMES = (
     (0.00, HOME_POSE),
-    (0.10, HUG_POSE),
+    (0.08, HUG_POSE),
     (0.20, FORWARD_POSE),
-    (0.30, BACK_POSE),
-    (0.40, SUPINE_POSE),
-    (0.48, LEFT_TAP_POSE),
-    (0.56, LEFT_TAP_POSE),
-    (0.60, SUPINE_POSE),
-    (0.64, RIGHT_TAP_POSE),
-    (0.72, RIGHT_TAP_POSE),
-    (0.76, SUPINE_POSE),
-    (0.90, SUPINE_POSE),
+    (0.34, FORWARD_POSE),
+    (0.42, BACK_POSE),
+    (0.58, BACK_POSE),
+    (0.64, SUPINE_POSE),
+    (0.66, LEFT_TAP_POSE),
+    (0.69, LEFT_TAP_POSE),
+    (0.71, RIGHT_TAP_POSE),
+    (0.74, RIGHT_TAP_POSE),
+    (0.76, LEFT_TAP_POSE),
+    (0.79, LEFT_TAP_POSE),
+    (0.81, RIGHT_TAP_POSE),
+    (0.84, RIGHT_TAP_POSE),
+    (0.86, LEFT_TAP_POSE),
+    (0.89, LEFT_TAP_POSE),
+    (0.91, RIGHT_TAP_POSE),
+    (0.94, RIGHT_TAP_POSE),
+    (0.96, SUPINE_POSE),
     (0.98, HUG_POSE),
     (1.00, HOME_POSE),
 )
@@ -145,15 +174,13 @@ BODY_LOCK_KEYFRAMES = ((0.0, BODY_HOME_POSE), (1.0, BODY_HOME_POSE))
 # measured value at the validated -90-degree supine root orientation.
 TRUNK_LEAN_KEYFRAMES = (
     (0.00, 0.00),
-    (0.10, 0.00),
+    (0.08, 0.00),
     (0.20, 0.12),
-    (0.30, -0.10),
-    (0.40, -1.00),
-    (0.48, -1.00),
-    (0.56, -1.00),
+    (0.34, 0.12),
+    (0.42, -0.10),
+    (0.58, -0.10),
     (0.64, -1.00),
-    (0.72, -1.00),
-    (0.90, -1.00),
+    (0.96, -1.00),
     (0.98, 0.00),
     (1.00, 0.00),
 )
@@ -163,26 +190,22 @@ TRUNK_LEAN_KEYFRAMES = (
 ROOT_PITCH_KEYFRAMES = (
     (0.00, 0.00),
     (0.20, 0.00),
-    (0.30, -0.10),
-    (0.40, -math.pi / 2.0),
-    (0.90, -math.pi / 2.0),
+    (0.34, 0.00),
+    (0.42, -0.10),
+    (0.58, -0.10),
+    (0.64, -math.pi / 2.0),
+    (0.96, -math.pi / 2.0),
     (0.98, 0.00),
     (1.00, 0.00),
 )
 ROOT_Z_KEYFRAMES = (
     (0.00, 0.120),
-    (0.30, 0.120),
-    (0.40, 0.055),
-    (0.90, 0.055),
+    (0.58, 0.120),
+    (0.64, 0.055),
+    (0.96, 0.055),
     (0.98, 0.120),
     (1.00, 0.120),
 )
-
-LEFT_FOOT_TAP_START = 0.48
-LEFT_FOOT_TAP_END = 0.56
-RIGHT_FOOT_TAP_START = 0.64
-RIGHT_FOOT_TAP_END = 0.72
-
 
 def make_microduck_laugh_choreo_env_cfg(play: bool = False, rough: bool = False):
     """Create the arm-enabled, phase-conditioned laugh choreography."""
@@ -213,7 +236,7 @@ def make_microduck_laugh_choreo_env_cfg(play: bool = False, rough: bool = False)
     cfg.rewards.pop("neck_action_rate_l2", None)
     cfg.rewards["laugh_choreography"] = RewardTermCfg(
         func=microduck_mdp.laugh_choreography_track,
-        weight=14.0,
+        weight=24.0,
         params={
             "command_name": "twist",
             "keyframes": LAUGH_KEYFRAMES,
@@ -223,7 +246,7 @@ def make_microduck_laugh_choreo_env_cfg(play: bool = False, rough: bool = False)
     )
     cfg.rewards["laugh_choreography_l1"] = RewardTermCfg(
         func=microduck_mdp.laugh_choreography_track_l1,
-        weight=3.0,
+        weight=5.0,
         params={
             "command_name": "twist",
             "keyframes": LAUGH_KEYFRAMES,
@@ -255,23 +278,17 @@ def make_microduck_laugh_choreo_env_cfg(play: bool = False, rough: bool = False)
         params={
             "sensor_name": hands_ground_cfg.name,
             "command_name": "twist",
-            "left_start": LEFT_FOOT_TAP_START,
-            "left_end": LEFT_FOOT_TAP_END,
-            "right_start": RIGHT_FOOT_TAP_START,
-            "right_end": RIGHT_FOOT_TAP_END,
+            "tap_windows": TAP_WINDOWS,
         },
     )
     cfg.rewards["laugh_hand_height"] = RewardTermCfg(
         func=microduck_mdp.laugh_hand_height_track,
-        weight=30.0,
+        weight=16.0,
         params={
             "command_name": "twist",
-            "left_start": LEFT_FOOT_TAP_START,
-            "left_end": LEFT_FOOT_TAP_END,
-            "right_start": RIGHT_FOOT_TAP_START,
-            "right_end": RIGHT_FOOT_TAP_END,
+            "tap_windows": TAP_WINDOWS,
             "target_height": 0.011,
-            "std": 0.025,
+            "std": 0.035,
             "asset_cfg": SceneEntityCfg(
                 "robot", site_names=("left_hand", "right_hand")
             ),
@@ -283,11 +300,8 @@ def make_microduck_laugh_choreo_env_cfg(play: bool = False, rough: bool = False)
         params={
             "sensor_name": "feet_ground_contact",
             "command_name": "twist",
-            "left_start": LEFT_FOOT_TAP_START,
-            "left_end": LEFT_FOOT_TAP_END,
-            "right_start": RIGHT_FOOT_TAP_START,
-            "right_end": RIGHT_FOOT_TAP_END,
-            "right_weight": 2.0,
+            "tap_windows": TAP_WINDOWS,
+            "right_weight": 1.0,
         },
     )
     cfg.rewards["laugh_foot_height"] = RewardTermCfg(
@@ -295,13 +309,10 @@ def make_microduck_laugh_choreo_env_cfg(play: bool = False, rough: bool = False)
         weight=35.0,
         params={
             "command_name": "twist",
-            "left_start": LEFT_FOOT_TAP_START,
-            "left_end": LEFT_FOOT_TAP_END,
-            "right_start": RIGHT_FOOT_TAP_START,
-            "right_end": RIGHT_FOOT_TAP_END,
+            "tap_windows": TAP_WINDOWS,
             "target_height": 0.012,
             "std": 0.025,
-            "right_weight": 2.0,
+            "right_weight": 1.0,
             "asset_cfg": SceneEntityCfg(
                 "robot", site_names=("left_foot", "right_foot")
             ),
@@ -325,13 +336,12 @@ def make_microduck_laugh_choreo_env_cfg(play: bool = False, rough: bool = False)
     cfg.rewards["upright"].weight = 0.0
     cfg.rewards["feet_grounded"].weight = 0.0
     cfg.rewards["feet_flat"].weight = 0.0
-    cfg.rewards["laugh_hand_taps"].weight = 0.0
-    cfg.rewards["laugh_hand_height"].weight = 0.0
+    cfg.rewards["laugh_hand_taps"].weight = 20.0
     cfg.rewards["laugh_trunk_lean"].weight = 8.0
     cfg.rewards["laugh_trunk_lean"].params["std"] = 0.18
     cfg.rewards["laugh_root_height"] = RewardTermCfg(
         func=microduck_mdp.laugh_root_height_track,
-        weight=5.0,
+        weight=8.0,
         params={
             "command_name": "twist",
             "keyframes": ROOT_Z_KEYFRAMES,
@@ -342,6 +352,10 @@ def make_microduck_laugh_choreo_env_cfg(play: bool = False, rough: bool = False)
     cfg.rewards["action_rate_l2"].weight = -0.40 if not play else -0.55
     cfg.rewards["joint_torques_l2"].weight = -2e-3
     cfg.rewards["self_collisions"].weight = -1.5
+    # Ground-pick's curriculum gradually increases smoothness to -2.0.  That
+    # is appropriate for a slow reach but suppresses this intentionally fast
+    # alternating tap sequence, so keep the choreography's fixed weight.
+    cfg.curriculum.pop("action_rate_weight", None)
 
     command = cfg.commands["twist"]
     cfg.commands["twist"] = microduck_mdp.GroundPickPhaseCommandCfg(

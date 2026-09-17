@@ -19,10 +19,7 @@ import numpy as np
 
 from mjlab_microduck.tasks.microduck_laugh_choreo_env_cfg import (
     LAUGH_KEYFRAMES,
-    LEFT_FOOT_TAP_END,
-    LEFT_FOOT_TAP_START,
-    RIGHT_FOOT_TAP_END,
-    RIGHT_FOOT_TAP_START,
+    TAP_WINDOWS,
     ROOT_PITCH_KEYFRAMES,
     ROOT_Z_KEYFRAMES,
 )
@@ -96,6 +93,10 @@ def render(output: Path, frames: int, width: int, height: int) -> dict[str, floa
         mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "left_foot_collision"),
         mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_foot_collision"),
     ]
+    hand_geoms = [
+        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "left_hand_collision"),
+        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_hand_collision"),
+    ]
     floor_geom = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "reference_floor")
     root_joint = mujoco.mj_name2id(
         model, mujoco.mjtObj.mjOBJ_JOINT, "trunk_base_freejoint"
@@ -116,6 +117,7 @@ def render(output: Path, frames: int, width: int, height: int) -> dict[str, floa
     min_root_z = float("inf")
     max_root_z = float("-inf")
     foot_tap_contact_frames = [0, 0]
+    hand_tap_contact_frames = [0, 0]
     foot_z_min = [float("inf"), float("inf")]
     foot_z_max = [float("-inf"), float("-inf")]
     try:
@@ -145,17 +147,18 @@ def render(output: Path, frames: int, width: int, height: int) -> dict[str, floa
             root_z = float(data.qpos[root_qpos + 2])
             min_root_z = min(min_root_z, root_z)
             max_root_z = max(max_root_z, root_z)
-            for index, (start, end) in enumerate(
-                (
-                    (LEFT_FOOT_TAP_START, LEFT_FOOT_TAP_END),
-                    (RIGHT_FOOT_TAP_START, RIGHT_FOOT_TAP_END),
-                )
-            ):
-                distance = mujoco.mj_geomDistance(
-                    model, data, foot_geoms[index], floor_geom, 1.0, np.zeros(6)
-                )
-                if start <= phase < end and distance <= 0.0:
-                    foot_tap_contact_frames[index] += 1
+            for start, end, side in TAP_WINDOWS:
+                index = 0 if side == "left" else 1
+                if start <= phase < end:
+                    for geoms, contact_frames in (
+                        (foot_geoms, foot_tap_contact_frames),
+                        (hand_geoms, hand_tap_contact_frames),
+                    ):
+                        distance = mujoco.mj_geomDistance(
+                            model, data, geoms[index], floor_geom, 1.0, np.zeros(6)
+                        )
+                        if distance <= 0.0:
+                            contact_frames[index] += 1
 
             renderer.update_scene(data, camera=camera)
             writer.append_data(renderer.render())
@@ -176,6 +179,8 @@ def render(output: Path, frames: int, width: int, height: int) -> dict[str, floa
         "right_foot_max_z_m": foot_z_max[1],
         "left_foot_tap_contact_frames": float(foot_tap_contact_frames[0]),
         "right_foot_tap_contact_frames": float(foot_tap_contact_frames[1]),
+        "left_hand_tap_contact_frames": float(hand_tap_contact_frames[0]),
+        "right_hand_tap_contact_frames": float(hand_tap_contact_frames[1]),
     }
     output.with_suffix(".json").write_text(
         json.dumps({"type": "kinematic_reference_supine", "stats": stats}, indent=2)
@@ -188,7 +193,7 @@ def render(output: Path, frames: int, width: int, height: int) -> dict[str, floa
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--frames", type=int, default=250)
+    parser.add_argument("--frames", type=int, default=350)
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=360)
     args = parser.parse_args()

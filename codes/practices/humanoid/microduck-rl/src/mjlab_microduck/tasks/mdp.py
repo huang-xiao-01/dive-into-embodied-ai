@@ -3051,6 +3051,33 @@ def laugh_choreography_track_l1(
     return -(current - target).abs().mean(dim=-1)
 
 
+def _laugh_tap_phase_masks(
+    phase: torch.Tensor,
+    tap_windows: tuple = (),
+    left_start: float = 0.58,
+    left_end: float = 0.72,
+    right_start: float = 0.72,
+    right_end: float = 0.88,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build left/right phase masks for one or more alternating tap windows."""
+    if tap_windows:
+        left_expected = torch.zeros_like(phase, dtype=torch.bool)
+        right_expected = torch.zeros_like(phase, dtype=torch.bool)
+        for start, end, side in tap_windows:
+            mask = (phase >= float(start)) & (phase < float(end))
+            if side == "left":
+                left_expected |= mask
+            elif side == "right":
+                right_expected |= mask
+            else:
+                raise ValueError(f"unknown laugh tap side: {side!r}")
+        return left_expected, right_expected
+    return (
+        (phase >= left_start) & (phase < left_end),
+        (phase >= right_start) & (phase < right_end),
+    )
+
+
 def laugh_alternating_hand_contact_reward(
     env: ManagerBasedRlEnv,
     sensor_name: str,
@@ -3059,12 +3086,13 @@ def laugh_alternating_hand_contact_reward(
     left_end: float = 0.72,
     right_start: float = 0.72,
     right_end: float = 0.88,
+    tap_windows: tuple = (),
 ) -> torch.Tensor:
-    """Reward left-then-right palm contact during the tap section.
+    """Reward alternating palm contact during the tap section.
 
     The contact sensor is configured with the left palm first and right palm
-    second.  Outside the two tap windows this term is silent, which lets the
-    arms hug the belly during the opening forward/back laugh.
+    second.  Outside the configured tap windows this term is silent, which
+    lets the arms hug the belly during the opening forward/back laugh.
     """
     if sensor_name not in env.scene.sensors:
         return torch.zeros(env.num_envs, device=env.device)
@@ -3077,8 +3105,9 @@ def laugh_alternating_hand_contact_reward(
     found = found.bool()
     if found.shape[1] < 2:
         return torch.zeros(env.num_envs, device=env.device)
-    left_expected = (phase >= left_start) & (phase < left_end)
-    right_expected = (phase >= right_start) & (phase < right_end)
+    left_expected, right_expected = _laugh_tap_phase_masks(
+        phase, tap_windows, left_start, left_end, right_start, right_end
+    )
     left = found[:, 0]
     right = found[:, 1]
     correct = left.float() * left_expected.float() + right.float() * right_expected.float()
@@ -3096,6 +3125,7 @@ def laugh_alternating_foot_contact_reward(
     right_start: float = 0.64,
     right_end: float = 0.72,
     right_weight: float = 1.0,
+    tap_windows: tuple = (),
 ) -> torch.Tensor:
     """Reward the expected foot touching the floor during the supine laugh.
 
@@ -3114,8 +3144,9 @@ def laugh_alternating_foot_contact_reward(
     found = found.bool()
     if found.shape[1] < 2:
         return torch.zeros(env.num_envs, device=env.device)
-    left_expected = (phase >= left_start) & (phase < left_end)
-    right_expected = (phase >= right_start) & (phase < right_end)
+    left_expected, right_expected = _laugh_tap_phase_masks(
+        phase, tap_windows, left_start, left_end, right_start, right_end
+    )
     left = found[:, 0]
     right = found[:, 1]
     correct = left.float() * left_expected.float() + right_weight * right.float() * right_expected.float()
@@ -3134,6 +3165,7 @@ def laugh_hand_height_track(
     target_height: float = 0.011,
     std: float = 0.025,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    tap_windows: tuple = (),
 ) -> torch.Tensor:
     """Give a dense gradient for lowering the expected palm to the floor."""
     asset: Entity = env.scene[asset_cfg.name]
@@ -3141,8 +3173,9 @@ def laugh_hand_height_track(
     hand_z = asset.data.site_pos_w[:, site_ids, 2]
     cmd = env.command_manager.get_command(command_name)
     phase = (torch.atan2(cmd[:, 1], cmd[:, 0]) / (2 * torch.pi)) % 1.0
-    left_expected = (phase >= left_start) & (phase < left_end)
-    right_expected = (phase >= right_start) & (phase < right_end)
+    left_expected, right_expected = _laugh_tap_phase_masks(
+        phase, tap_windows, left_start, left_end, right_start, right_end
+    )
     left_score = torch.exp(-((hand_z[:, 0] - target_height) / std) ** 2)
     right_score = torch.exp(-((hand_z[:, 1] - target_height) / std) ** 2)
     return left_score * left_expected.float() + right_score * right_expected.float()
@@ -3159,6 +3192,7 @@ def laugh_foot_height_track(
     std: float = 0.025,
     right_weight: float = 1.0,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    tap_windows: tuple = (),
 ) -> torch.Tensor:
     """Give a dense gradient for lowering the expected tapping foot."""
     asset: Entity = env.scene[asset_cfg.name]
@@ -3166,8 +3200,9 @@ def laugh_foot_height_track(
     foot_z = asset.data.site_pos_w[:, site_ids, 2]
     cmd = env.command_manager.get_command(command_name)
     phase = (torch.atan2(cmd[:, 1], cmd[:, 0]) / (2 * torch.pi)) % 1.0
-    left_expected = (phase >= left_start) & (phase < left_end)
-    right_expected = (phase >= right_start) & (phase < right_end)
+    left_expected, right_expected = _laugh_tap_phase_masks(
+        phase, tap_windows, left_start, left_end, right_start, right_end
+    )
     left_score = torch.exp(-((foot_z[:, 0] - target_height) / std) ** 2)
     right_score = torch.exp(-((foot_z[:, 1] - target_height) / std) ** 2)
     return left_score * left_expected.float() + right_weight * right_score * right_expected.float()
