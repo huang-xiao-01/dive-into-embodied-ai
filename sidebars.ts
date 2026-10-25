@@ -46,10 +46,10 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         { type: 'link', label: '视觉语言大模型(VLM)', href: '/docs/foundations/vlm/intro' },
-        { type: 'link', label: '传感器标定与 sim2real', href: '/docs/foundations/perception/1.sensor-calibration-sim2real' },
-        { type: 'link', label: 'ODO、时间戳与状态估计', href: '/docs/foundations/perception/2.odo-timestamps-state-estimation' },
-        { type: 'link', label: '相机、LiDAR 与 IMU 外参与投影', href: '/docs/foundations/perception/3.sensor-projection' },
-        { type: 'link', label: '在线标定、评测与故障诊断', href: '/docs/foundations/perception/4.online-calibration-diagnosis' },
+        { type: 'link', label: '传感器标定与 sim2real', href: '/docs/foundations/perception/sensor-calibration-sim2real' },
+        { type: 'link', label: 'ODO、时间戳与状态估计', href: '/docs/foundations/perception/odo-timestamps-state-estimation' },
+        { type: 'link', label: '相机、LiDAR 与 IMU 外参与投影', href: '/docs/foundations/perception/sensor-projection' },
+        { type: 'link', label: '在线标定、评测与故障诊断', href: '/docs/foundations/perception/online-calibration-diagnosis' },
       ],
     },
     {
@@ -174,7 +174,7 @@ const sidebars: SidebarsConfig = {
       collapsed: false,
       items: [
         { type: 'link', label: '从零到一搭建四足机器人', href: '/docs/practices/quadruped/cs123/intro' },
-        { type: 'link', label: 'MicroDuck RL：走路、起身和翻滚', href: '/docs/practices/humanoid/microduck-rl' },
+        { type: 'link', label: 'MicroDuck RL：教小黄鸭学会一个动作', href: '/docs/practices/humanoid/microduck-rl' },
         { type: 'link', label: 'MuJoCo 仿真入门', href: '/docs/practices/robot-arm/mujoco-arm-pick-place' },
         { type: 'link', label: 'DDPG InvertedPendulum', href: '/docs/practices/robot-arm/ddpg-mujoco/invertedpendulum-v5' },
         { type: 'link', label: 'DDPG Reacher', href: '/docs/practices/robot-arm/ddpg-mujoco/reacher-v5' },
